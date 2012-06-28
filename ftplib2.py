@@ -60,6 +60,7 @@ FTP_PORT = 21
 
 # Exception raised when an error or invalid response is received
 class Error(Exception): pass
+class error_closed(Error): pass         # Connection is alredy closed.
 class error_reply(Error): pass          # unexpected [123]xx reply
 class error_temp(Error): pass           # 4xx errors
 class error_perm(Error): pass           # 5xx errors
@@ -190,6 +191,8 @@ class FTP:
 
     # Internal: send one line to the server, appending CRLF
     def putline(self, line):
+        if self.sock is None:
+            raise error_closed()
         line = line + CRLF
         if self.debugging > 1: print '*put*', self.sanitize(line)
         self.sock.sendall(line)
