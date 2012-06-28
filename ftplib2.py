@@ -106,6 +106,7 @@ class FTP:
     file = None
     welcome = None
     passiveserver = 1
+    extended_address = True
 
     # Initialization method (called by class instantiation).
     # Initialize host to localhost, port to standard ftp port
@@ -171,6 +172,12 @@ class FTP:
         With a false argument, use the normal PORT mode,
         With a true argument, use the PASV command.'''
         self.passiveserver = val
+
+    def set_extended_address(self, val):
+        '''Use extended passive or active mode for data transfers.
+        With a false argument, use the normal EPRT mode,
+        With a true argument, use the PASV command.'''
+        self.extended_address = val
 
     # Internal: "sanitize" a string for printing
     def sanitize(self, s):
@@ -306,19 +313,22 @@ class FTP:
         sock.listen(1)
         port = sock.getsockname()[1] # Get proper port
         host = self.sock.getsockname()[0] # Get proper host
-        if self.af == socket.AF_INET:
-            resp = self.sendport(host, port)
-        else:
+
+        if self.extended_address:
             resp = self.sendeprt(host, port)
+        else:
+            resp = self.sendport(host, port)
+
         if self.timeout is not _GLOBAL_DEFAULT_TIMEOUT:
             sock.settimeout(self.timeout)
         return sock
 
     def makepasv(self):
-        if self.af == socket.AF_INET:
-            host, port = parse227(self.sendcmd('PASV'))
+        if self.extended_address:
+            host, port = parse229(
+                self.sendcmd('EPSV'), self.sock.getpeername())
         else:
-            host, port = parse229(self.sendcmd('EPSV'), self.sock.getpeername())
+            host, port = parse227(self.sendcmd('PASV'))
         return host, port
 
     def ntransfercmd(self, cmd, rest=None):
