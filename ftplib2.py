@@ -728,6 +728,8 @@ else:
                 resp = self.voidcmd('AUTH SSL')
 
             self.init_ssl_context()
+            self._clean_socket = self.sock
+            self._clean_file = self.file
             self.sock = ssl.Connection(self.ssl_context, self.sock)
             self.sock.set_connect_state()
             self.file = socket._fileobject(self.sock, 'rb')
@@ -753,6 +755,19 @@ else:
             '''Set up clear text data connection.'''
             resp = self.voidcmd('PROT C')
             self._prot_p = False
+            return resp
+
+        def ccc(self):
+            resp = self.voidcmd('CCC')
+            self.sock.set_shutdown(ssl.SENT_SHUTDOWN | ssl.RECEIVED_SHUTDOWN)
+            done = self.sock.shutdown()
+            assert done is True
+            self.sock = self._clean_socket
+            self.file = self.sock.makefile('rb')
+
+            # Flush the data from the tls shutdown.
+            self.sock.recv(100)
+
             return resp
 
         # --- Overridden FTP methods
