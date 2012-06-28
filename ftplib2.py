@@ -650,12 +650,17 @@ else:
         '221 Goodbye.'
         >>>
         '''
-        ssl_version = ssl.TLSv1_METHOD
 
         def __init__(self, host='', user='', passwd='', acct='', keyfile=None,
-                     certfile=None, timeout=_GLOBAL_DEFAULT_TIMEOUT):
+                     certfile=None, timeout=_GLOBAL_DEFAULT_TIMEOUT,
+                     cipher_list=None, method=None, cafile=None):
             self.keyfile = keyfile
             self.certfile = certfile
+            self.cafile = cafile
+            self.cipher_list = cipher_list
+            if method is None:
+                method = ssl.SSLv23_METHOD
+            self.method = method
             self._prot_p = False
             self.ssl_context = None
             FTP.__init__(self, host, user, passwd, acct, timeout)
@@ -663,13 +668,8 @@ else:
         def init_ssl_context(self):
             '''Retun a SSL context for this client.'''
             if self.ssl_context is None:
-                self.ssl_context = ssl.Context(self.ssl_version)
-            if self.ssl_version != ssl.SSLv2_METHOD:
-                self.ssl_context.set_options(ssl.OP_NO_SSLv2)
-            else:
-                import warnings
-                warnings.warn(
-                        "SSLv2 protocol is insecure", RuntimeWarning)
+                self.ssl_context = ssl.Context(self.method)
+
             if self.certfile:
                 self.ssl_context.use_certificate_file(self.certfile)
 
@@ -679,7 +679,32 @@ else:
             if self.keyfile:
                 self.ssl_context.use_privatekey_file(self.keyfile)
 
-        def remove_ssl_context(self, socket):
+            if self.cipher_list:
+                self.ssl_context.set_cipher_list(self.cipher_list)
+
+            if self.cafile:
+
+                def verify_server_certificate(
+                    conn, cert, errno, depth, preverify_ok):
+                    return preverify_ok
+
+                self.ssl_context.set_verify(
+                    ssl.VERIFY_PEER | ssl.VERIFY_FAIL_IF_NO_PEER_CERT |
+                        ssl.VERIFY_CLIENT_ONCE,
+                    verify_server_certificate,
+                    )
+                self.ssl_context.load_verify_locations(self.cafile, None)
+
+            self._OP_ALL = getattr(ssl, 'OP_ALL', 0x0000FFFF)
+            self.ssl_context.set_options(self._OP_ALL)
+
+            # OP_NO_TICKET is not (yet) exposed by PyOpenSSL
+            self._OP_NO_TICKET = 0x00004000
+            self.ssl_context.set_options(self._OP_NO_TICKET)
+
+            self.ssl_context.set_options(ssl.OP_SINGLE_DH_USE)
+
+        def doSSLShutdown(self, socket):
             '''Clear the SSL part of a socket.'''
             # see twisted/internet/tcp.py
             laststate = socket.get_shutdown()
@@ -697,7 +722,7 @@ else:
             '''Set up secure control connection by using TLS/SSL.'''
             if isinstance(self.sock, ssl.Connection):
                 raise ValueError("Already using TLS")
-            if self.ssl_version == ssl.TLSv1_METHOD:
+            if self.method == ssl.TLSv1_METHOD:
                 resp = self.voidcmd('AUTH TLS')
             else:
                 resp = self.voidcmd('AUTH SSL')
@@ -747,13 +772,19 @@ else:
             conn = self.transfercmd(cmd, rest)
             try:
                 while 1:
-                    data = conn.recv(blocksize)
+                    data = None
+                    try:
+                        data = conn.recv(blocksize)
+                    except ssl.ZeroReturnError:
+                        # pyOpenSSL does not return 0, but rather
+                        # SSL.ZeroReturnError
+                        pass
                     if not data:
                         break
                     callback(data)
                 # shutdown ssl layer
                 if isinstance(conn, ssl.Connection):
-                    self.remove_ssl_context(conn)
+                    self.doSSLShutdown(conn)
             finally:
                 conn.close()
             return self.voidresp()
@@ -781,7 +812,7 @@ else:
                     callback(line)
                 # shutdown ssl layer
                 if isinstance(conn, ssl.Connection):
-                    self.remove_ssl_context(conn)
+                    self.doSSLShutdown(conn)
             finally:
                 fp.close()
                 conn.close()
@@ -798,7 +829,7 @@ else:
                     if callback: callback(buf)
                 # shutdown ssl layer
                 if isinstance(conn, ssl.Connection):
-                    self.remove_ssl_context(conn)
+                    self.doSSLShutdown(conn)
             finally:
                 conn.close()
             return self.voidresp()
@@ -817,7 +848,7 @@ else:
                     if callback: callback(buf)
                 # shutdown ssl layer
                 if isinstance(conn, ssl.Connection):
-                    self.remove_ssl_context(conn)
+                    self.doSSLShutdown(conn)
             finally:
                 conn.close()
             return self.voidresp()
