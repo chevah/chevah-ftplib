@@ -45,7 +45,8 @@ try:
     from socket import getfqdn; socket.getfqdn = getfqdn; del getfqdn
 except ImportError:
     import socket
-from socket import _GLOBAL_DEFAULT_TIMEOUT
+
+_GLOBAL_DEFAULT_TIMEOUT = 5
 
 __all__ = ["FTP","Netrc"]
 
@@ -59,6 +60,7 @@ FTP_PORT = 21
 
 # Exception raised when an error or invalid response is received
 class Error(Exception): pass
+class error_closed(Error): pass         # Connection is alredy closed.
 class error_reply(Error): pass          # unexpected [123]xx reply
 class error_temp(Error): pass           # 4xx errors
 class error_perm(Error): pass           # 5xx errors
@@ -105,6 +107,7 @@ class FTP:
     file = None
     welcome = None
     passiveserver = 1
+    extended_address = True
 
     # Initialization method (called by class instantiation).
     # Initialize host to localhost, port to standard ftp port
@@ -129,7 +132,21 @@ class FTP:
             self.port = port
         if timeout != -999:
             self.timeout = timeout
-        self.sock = socket.create_connection((self.host, self.port), self.timeout)
+        msg = "getaddrinfo returns an empty list"
+        for res in socket.getaddrinfo(
+            self.host, self.port, 0, socket.SOCK_STREAM):
+            af, socktype, proto, canonname, sa = res
+            try:
+                self.sock = socket.socket(af, socktype, proto)
+                self.sock.connect(sa)
+            except socket.error, msg:
+                if self.sock:
+                    self.sock.close()
+                self.sock = None
+                continue
+            break
+        if not self.sock:
+            raise socket.error, msg
         self.af = self.sock.family
         self.file = self.sock.makefile('rb')
         self.welcome = self.getresp()
@@ -157,6 +174,12 @@ class FTP:
         With a true argument, use the PASV command.'''
         self.passiveserver = val
 
+    def set_extended_address(self, val):
+        '''Use extended passive or active mode for data transfers.
+        With a false argument, use the normal EPRT mode,
+        With a true argument, use the PASV command.'''
+        self.extended_address = val
+
     # Internal: "sanitize" a string for printing
     def sanitize(self, s):
         if s[:5] == 'pass ' or s[:5] == 'PASS ':
@@ -168,6 +191,8 @@ class FTP:
 
     # Internal: send one line to the server, appending CRLF
     def putline(self, line):
+        if self.sock is None:
+            raise error_closed()
         line = line + CRLF
         if self.debugging > 1: print '*put*', self.sanitize(line)
         self.sock.sendall(line)
@@ -291,19 +316,22 @@ class FTP:
         sock.listen(1)
         port = sock.getsockname()[1] # Get proper port
         host = self.sock.getsockname()[0] # Get proper host
-        if self.af == socket.AF_INET:
-            resp = self.sendport(host, port)
-        else:
+
+        if self.extended_address:
             resp = self.sendeprt(host, port)
+        else:
+            resp = self.sendport(host, port)
+
         if self.timeout is not _GLOBAL_DEFAULT_TIMEOUT:
             sock.settimeout(self.timeout)
         return sock
 
     def makepasv(self):
-        if self.af == socket.AF_INET:
-            host, port = parse227(self.sendcmd('PASV'))
+        if self.extended_address:
+            host, port = parse229(
+                self.sendcmd('EPSV'), self.sock.getpeername())
         else:
-            host, port = parse229(self.sendcmd('EPSV'), self.sock.getpeername())
+            host, port = parse227(self.sendcmd('PASV'))
         return host, port
 
     def ntransfercmd(self, cmd, rest=None):
@@ -324,40 +352,36 @@ class FTP:
         size = None
         if self.passiveserver:
             host, port = self.makepasv()
-            conn = socket.create_connection((host, port), self.timeout)
-            try:
-                if rest is not None:
-                    self.sendcmd("REST %s" % rest)
-                resp = self.sendcmd(cmd)
-                # Some servers apparently send a 200 reply to
-                # a LIST or STOR command, before the 150 reply
-                # (and way before the 226 reply). This seems to
-                # be in violation of the protocol (which only allows
-                # 1xx or error messages for LIST), so we just discard
-                # this response.
-                if resp[0] == '2':
-                    resp = self.getresp()
-                if resp[0] != '1':
-                    raise error_reply, resp
-            except:
-                conn.close()
-                raise
+            af, socktype, proto, canon, sa = socket.getaddrinfo(
+                host, port, 0, socket.SOCK_STREAM)[0]
+            conn = socket.socket(af, socktype, proto)
+            conn.connect(sa)
+            if rest is not None:
+                self.sendcmd("REST %s" % rest)
+            resp = self.sendcmd(cmd)
+            # Some servers apparently send a 200 reply to
+            # a LIST or STOR command, before the 150 reply
+            # (and way before the 226 reply). This seems to
+            # be in violation of the protocol (which only allows
+            # 1xx or error messages for LIST), so we just discard
+            # this response.
+            if resp[0] == '2':
+                resp = self.getresp()
+            if resp[0] != '1':
+                raise error_reply, resp
         else:
             sock = self.makeport()
-            try:
-                if rest is not None:
-                    self.sendcmd("REST %s" % rest)
-                resp = self.sendcmd(cmd)
-                # See above.
-                if resp[0] == '2':
-                    resp = self.getresp()
-                if resp[0] != '1':
-                    raise error_reply, resp
-                conn, sockaddr = sock.accept()
-                if self.timeout is not _GLOBAL_DEFAULT_TIMEOUT:
-                    conn.settimeout(self.timeout)
-            finally:
-                sock.close()
+            if rest is not None:
+                self.sendcmd("REST %s" % rest)
+            resp = self.sendcmd(cmd)
+            # See above.
+            if resp[0] == '2':
+                resp = self.getresp()
+            if resp[0] != '1':
+                raise error_reply, resp
+            conn, sockaddr = sock.accept()
+            if self.timeout is not _GLOBAL_DEFAULT_TIMEOUT:
+                conn.settimeout(self.timeout)
         if resp[:3] == '150':
             # this is conditional in case we received a 125
             size = parse150(resp)
@@ -589,7 +613,7 @@ class FTP:
         self.file = self.sock = None
 
 try:
-    import ssl
+    import OpenSSL.SSL as ssl
 except ImportError:
     pass
 else:
@@ -629,28 +653,87 @@ else:
         ssl_version = ssl.PROTOCOL_TLSv1
 
         def __init__(self, host='', user='', passwd='', acct='', keyfile=None,
-                     certfile=None, timeout=_GLOBAL_DEFAULT_TIMEOUT):
+                     certfile=None, timeout=_GLOBAL_DEFAULT_TIMEOUT,
+                     cipher_list=None, method=None, cafile=None):
             self.keyfile = keyfile
             self.certfile = certfile
+            self.cafile = cafile
+            self.cipher_list = cipher_list
+            if method is None:
+                method = ssl.SSLv23_METHOD
+            self.method = method
             self._prot_p = False
+            self.ssl_context = None
             FTP.__init__(self, host, user, passwd, acct, timeout)
 
+        def init_ssl_context(self):
+            '''Retun a SSL context for this client.'''
+            if self.ssl_context is None:
+                self.ssl_context = ssl.Context(self.method)
+
+            if self.certfile:
+                self.ssl_context.use_certificate_file(self.certfile)
+
+            if not self.keyfile:
+                self.keyfile = self.certfile
+
+            if self.keyfile:
+                self.ssl_context.use_privatekey_file(self.keyfile)
+
+            if self.cipher_list:
+                self.ssl_context.set_cipher_list(self.cipher_list)
+
+            if self.cafile:
+
+                def verify_server_certificate(
+                    conn, cert, errno, depth, preverify_ok):
+                    return preverify_ok
+
+                self.ssl_context.set_verify(
+                    ssl.VERIFY_PEER | ssl.VERIFY_FAIL_IF_NO_PEER_CERT |
+                        ssl.VERIFY_CLIENT_ONCE,
+                    verify_server_certificate,
+                    )
+                self.ssl_context.load_verify_locations(self.cafile, None)
+
+            self._OP_ALL = getattr(ssl, 'OP_ALL', 0x0000FFFF)
+            self.ssl_context.set_options(self._OP_ALL)
+
+            # OP_NO_TICKET is not (yet) exposed by PyOpenSSL
+            self._OP_NO_TICKET = 0x00004000
+            self.ssl_context.set_options(self._OP_NO_TICKET)
+
+            self.ssl_context.set_options(ssl.OP_SINGLE_DH_USE)
+
+        def doSSLShutdown(self, socket):
+            '''Clear the SSL part of a socket.'''
+            # see twisted/internet/tcp.py
+            laststate = socket.get_shutdown()
+            socket.set_shutdown(laststate | ssl.RECEIVED_SHUTDOWN)
+            done = socket.shutdown()
+            if not (laststate & ssl.RECEIVED_SHUTDOWN):
+                socket.set_shutdown(ssl.SENT_SHUTDOWN)
+
         def login(self, user='', passwd='', acct='', secure=True):
-            if secure and not isinstance(self.sock, ssl.SSLSocket):
+            if secure and not isinstance(self.sock, ssl.Connection):
                 self.auth()
             return FTP.login(self, user, passwd, acct)
 
         def auth(self):
             '''Set up secure control connection by using TLS/SSL.'''
-            if isinstance(self.sock, ssl.SSLSocket):
+            if isinstance(self.sock, ssl.Connection):
                 raise ValueError("Already using TLS")
-            if self.ssl_version == ssl.PROTOCOL_TLSv1:
+            if self.method == ssl.TLSv1_METHOD:
                 resp = self.voidcmd('AUTH TLS')
             else:
                 resp = self.voidcmd('AUTH SSL')
-            self.sock = ssl.wrap_socket(self.sock, self.keyfile, self.certfile,
-                                        ssl_version=self.ssl_version)
-            self.file = self.sock.makefile(mode='rb')
+
+            self.init_ssl_context()
+            self._clean_socket = self.sock
+            self._clean_file = self.file
+            self.sock = ssl.Connection(self.ssl_context, self.sock)
+            self.sock.set_connect_state()
+            self.file = socket._fileobject(self.sock, 'rb')
             return resp
 
         def prot_p(self):
@@ -675,13 +758,29 @@ else:
             self._prot_p = False
             return resp
 
+        def ccc(self):
+            resp = self.voidcmd('CCC')
+            self.sock.set_shutdown(ssl.SENT_SHUTDOWN | ssl.RECEIVED_SHUTDOWN)
+            done = self.sock.shutdown()
+            assert done is True
+            self.sock = self._clean_socket
+            self.file = self.sock.makefile('rb')
+
+            # Flush the data from the tls shutdown.
+            self.sock.recv(100)
+
+            return resp
+
         # --- Overridden FTP methods
 
         def ntransfercmd(self, cmd, rest=None):
+            '''See `FTP.ntransfercmd`.
+
+            Initiate a transfer over data channel.'''
             conn, size = FTP.ntransfercmd(self, cmd, rest)
             if self._prot_p:
-                conn = ssl.wrap_socket(conn, self.keyfile, self.certfile,
-                                       ssl_version=self.ssl_version)
+                conn = ssl.Connection(self.ssl_context, conn)
+                conn.set_connect_state()
             return conn, size
 
         def retrbinary(self, cmd, callback, blocksize=8192, rest=None):
@@ -689,13 +788,19 @@ else:
             conn = self.transfercmd(cmd, rest)
             try:
                 while 1:
-                    data = conn.recv(blocksize)
+                    data = None
+                    try:
+                        data = conn.recv(blocksize)
+                    except ssl.ZeroReturnError:
+                        # pyOpenSSL does not return 0, but rather
+                        # SSL.ZeroReturnError
+                        pass
                     if not data:
                         break
                     callback(data)
                 # shutdown ssl layer
-                if isinstance(conn, ssl.SSLSocket):
-                    conn.unwrap()
+                if isinstance(conn, ssl.Connection):
+                    self.doSSLShutdown(conn)
             finally:
                 conn.close()
             return self.voidresp()
@@ -704,12 +809,17 @@ else:
             if callback is None: callback = print_line
             resp = self.sendcmd('TYPE A')
             conn = self.transfercmd(cmd)
-            fp = conn.makefile('rb')
+            fp = socket._fileobject(conn, 'rb')
             try:
                 while 1:
-                    line = fp.readline()
-                    if self.debugging > 2: print '*retr*', repr(line)
-                    if not line:
+                    try:
+                        line = fp.readline()
+                        if self.debugging > 2: print '*retr*', repr(line)
+                        if not line:
+                            break
+                    except ssl.ZeroReturnError:
+                        '''When the socket is using SSL it will raise
+                        ZeroReturnError instead of returning 0.'''
                         break
                     if line[-2:] == CRLF:
                         line = line[:-2]
@@ -717,8 +827,8 @@ else:
                         line = line[:-1]
                     callback(line)
                 # shutdown ssl layer
-                if isinstance(conn, ssl.SSLSocket):
-                    conn.unwrap()
+                if isinstance(conn, ssl.Connection):
+                    self.doSSLShutdown(conn)
             finally:
                 fp.close()
                 conn.close()
@@ -734,8 +844,8 @@ else:
                     conn.sendall(buf)
                     if callback: callback(buf)
                 # shutdown ssl layer
-                if isinstance(conn, ssl.SSLSocket):
-                    conn.unwrap()
+                if isinstance(conn, ssl.Connection):
+                    self.doSSLShutdown(conn)
             finally:
                 conn.close()
             return self.voidresp()
@@ -753,14 +863,14 @@ else:
                     conn.sendall(buf)
                     if callback: callback(buf)
                 # shutdown ssl layer
-                if isinstance(conn, ssl.SSLSocket):
-                    conn.unwrap()
+                if isinstance(conn, ssl.Connection):
+                    self.doSSLShutdown(conn)
             finally:
                 conn.close()
             return self.voidresp()
 
     __all__.append('FTP_TLS')
-    all_errors = (Error, IOError, EOFError, ssl.SSLError)
+    all_errors = (Error, IOError, EOFError, ssl.Error)
 
 
 _150_re = None
