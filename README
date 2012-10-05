@@ -3,4 +3,12 @@ Backporting of Python ftplib from 2.7 to 2.5.
 This is a quick and dirty port.
 pyOpenSSL is used instead of the standard ssl module.
 
+* Add support for FTPS CCC
+* Add support for Implicit FTPS
+* Allow explicit usage of extended commands.
+* Raise an explicit error if command channel was not properly closed.
+* Allow using an explicit cipher list.
+* Allow using an explicit SSL/TLS method.
+* Allow checking server indentity.
+
 This code is `experimental`.
