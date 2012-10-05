@@ -650,7 +650,7 @@ else:
         '221 Goodbye.'
         >>>
         '''
-        ssl_version = ssl.PROTOCOL_TLSv1
+        ssl_version = ssl.SSLv23_METHOD
 
         def __init__(self, host='', user='', passwd='', acct='', keyfile=None,
                      certfile=None, timeout=_GLOBAL_DEFAULT_TIMEOUT,
@@ -660,7 +660,7 @@ else:
             self.cafile = cafile
             self.cipher_list = cipher_list
             if method is None:
-                method = ssl.SSLv23_METHOD
+                method = self.ssl_version
             self.method = method
             self._prot_p = False
             self.ssl_context = None
@@ -871,6 +871,53 @@ else:
 
     __all__.append('FTP_TLS')
     all_errors = (Error, IOError, EOFError, ssl.Error)
+
+    class FTP_TLSI(FTP_TLS):
+        '''A FTP_TLS subclass which add implicit FTPS support.'''
+
+        def __init__(self, *args, **kwargs):
+            FTP_TLS.__init__(self, *args, **kwargs)
+            self.init_ssl_context()
+
+        def connect(self, host='', port=0, timeout=-999):
+            '''Connect to host.  Arguments are:
+             - host: hostname to connect to (string, default previous host)
+             - port: port to connect to (integer, default previous port)
+            '''
+            if host != '':
+                self.host = host
+            if port > 0:
+                self.port = port
+            if timeout != -999:
+                self.timeout = timeout
+            msg = "getaddrinfo returns an empty list"
+            for res in socket.getaddrinfo(
+                self.host, self.port, 0, socket.SOCK_STREAM):
+                af, socktype, proto, canonname, sa = res
+                try:
+                    self._clean_socket = socket.socket(af, socktype)
+                    self._clean_socket.connect(sa)
+                    self.sock = ssl.Connection(
+                        self.ssl_context, self._clean_socket)
+                    self.sock.setblocking(True)
+                    self.sock.set_connect_state()
+                except socket.error, msg:
+                    if self.sock:
+                        self.sock.close()
+                    self.sock = None
+                    continue
+                break
+            if not self.sock:
+                raise socket.error, msg
+            self.af = self.sock.family
+            self.file = socket._fileobject(self.sock, 'rb')
+            self.welcome = self.getresp()
+            return self.welcome
+
+        def login(self, user='', passwd='', acct='', secure=True):
+            return FTP.login(self, user, passwd, acct)
+
+    __all__.append('FTP_TLSI')
 
 
 _150_re = None
