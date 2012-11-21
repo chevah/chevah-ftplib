@@ -109,6 +109,9 @@ class FTP:
     passiveserver = 1
     extended_address = True
 
+    last_passive_host = None
+    last_passive_port = None
+
     # Initialization method (called by class instantiation).
     # Initialize host to localhost, port to standard ftp port
     # Optional arguments are host (for connect()),
@@ -352,6 +355,8 @@ class FTP:
         size = None
         if self.passiveserver:
             host, port = self.makepasv()
+            self.last_passive_host = host
+            self.last_passive_port = port
             af, socktype, proto, canon, sa = socket.getaddrinfo(
                 host, port, 0, socket.SOCK_STREAM)[0]
             conn = socket.socket(af, socktype, proto)

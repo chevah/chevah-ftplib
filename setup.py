@@ -5,14 +5,17 @@ Package definition for chevah.ftpslib.
 """
 
 from distutils import log
-from setuptools import Command, find_packages, setup
+from setuptools import Command, setup
 import os
 import shutil
 
+VERSION = '2.7.3-chevah3'
 
-class CacheCommand(Command):
+
+class PublishCommand(Command):
     """
-    Copy the sdist files to local pypi cache.
+    Publish the source distribution to local pypi cache and remote
+    Chevah PyPi server.
     """
 
     description = "copy distributable to Chevah cache folder"
@@ -38,10 +41,15 @@ class CacheCommand(Command):
         log.info(
             "Distributables files copied to %s " % (self.destination_base))
 
+        # Upload package to Chevah PyPi server.
+        upload_command = self.distribution.get_command_obj('upload')
+        upload_command.repository = u'chevah'
+        self.run_command('upload')
+
 
 distribution = setup(
     name='chevah-ftplib',
-    version='2.7.3-chevah2',
+    version=VERSION,
     maintainer="Adi Roiban",
     maintainer_email="adi.roiban@chevah.com",
     license='Python License',
@@ -53,6 +61,6 @@ distribution = setup(
     package_dir={'chevah.ftplib': 'ftplib'},
     packages=['chevah', 'chevah.ftplib'],
     cmdclass={
-        'cache': CacheCommand,
+        'publish': PublishCommand,
         },
     )
