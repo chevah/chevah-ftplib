@@ -9,7 +9,7 @@ from setuptools import Command, setup
 import os
 import shutil
 
-VERSION = '2.7.3-chevah3'
+VERSION = '2.7.3-chevah4'
 
 
 class PublishCommand(Command):
