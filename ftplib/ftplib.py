@@ -720,10 +720,10 @@ else:
                 # This means that SSL layers still needs to read data in order
                 # to get our data.
                 # We wait for SSL thread to do its job and try again.
-                # Waiting for less than 0.001 result in reaching the
+                # Waiting for less than 0.01 result in reaching the
                 # recursion limit.
                 import time
-                time.sleep(0.001)
+                time.sleep(0.01)
                 return self._readSSL(callback, *args, **kwargs)
 
         def getline(self):
