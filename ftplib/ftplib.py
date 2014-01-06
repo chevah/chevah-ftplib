@@ -710,6 +710,25 @@ else:
 
             self.ssl_context.set_options(ssl.OP_SINGLE_DH_USE)
 
+        def _readSSL(self, callback, *args, **kwargs):
+            """
+            Try to read from SSL layer, retrying on WantReadError.
+            """
+            try:
+                return callback(*args, **kwargs)
+            except ssl.WantReadError:
+                # This means that SSL layers still needs to read data in order
+                # to get our data.
+                # We wait for SSL thread to do its job and try again.
+                # Waiting for less than 0.001 result in reaching the
+                # recursion limit.
+                import time
+                time.sleep(0.001)
+                return self._readSSL(callback, *args, **kwargs)
+
+        def getline(self):
+            return self._readSSL(FTP.getline, self)
+
         def doSSLShutdown(self, socket):
             '''Clear the SSL part of a socket.'''
             # see twisted/internet/tcp.py
@@ -795,7 +814,7 @@ else:
                 while 1:
                     data = None
                     try:
-                        data = conn.recv(blocksize)
+                        data = self._readSSL(conn.recv, blocksize)
                     except ssl.ZeroReturnError:
                         # pyOpenSSL does not return 0, but rather
                         # SSL.ZeroReturnError
@@ -818,7 +837,7 @@ else:
             try:
                 while 1:
                     try:
-                        line = fp.readline()
+                        line = self._readSSL(fp.readline)
                         if self.debugging > 2: print '*retr*', repr(line)
                         if not line:
                             break
