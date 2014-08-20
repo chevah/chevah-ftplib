@@ -6,7 +6,7 @@ Package definition for chevah.ftpslib.
 from setuptools import Command, setup
 import os
 
-VERSION = '2.7.3-chevah6'
+VERSION = '2.7.3.c7'
 
 
 class PublishCommand(Command):
@@ -20,7 +20,6 @@ class PublishCommand(Command):
 
     def initialize_options(self):
         self.cwd = None
-        self.destination_base = '~/chevah/brink/cache/pypi/'
 
     def finalize_options(self):
         self.cwd = os.getcwd()

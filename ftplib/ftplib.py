@@ -731,12 +731,19 @@ else:
 
         def doSSLShutdown(self, socket):
             '''Clear the SSL part of a socket.'''
-            # see twisted/internet/tcp.py
-            laststate = socket.get_shutdown()
-            socket.set_shutdown(laststate | ssl.RECEIVED_SHUTDOWN)
+            socket.set_shutdown(ssl.SENT_SHUTDOWN | ssl.RECEIVED_SHUTDOWN)
+
+            # Don't close the socket unless negotiation is done.
+            while (
+                    socket.state_string() !=
+                    'SSL negotiation finished successfully'
+                ):
+                try:
+                    socket.do_handshake()
+                except ssl.WantReadError:
+                    pass
+
             done = socket.shutdown()
-            if not (laststate & ssl.RECEIVED_SHUTDOWN):
-                socket.set_shutdown(ssl.SENT_SHUTDOWN)
 
         def login(self, user='', passwd='', acct='', secure=True):
             if secure and not isinstance(self.sock, ssl.Connection):
