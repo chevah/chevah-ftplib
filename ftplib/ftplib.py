@@ -734,14 +734,14 @@ else:
             socket.set_shutdown(ssl.SENT_SHUTDOWN | ssl.RECEIVED_SHUTDOWN)
 
             # Don't close the socket unless negotiation is done.
-            while (
-                    socket.state_string() !=
-                    'SSL negotiation finished successfully'
-                ):
+            while True:
                 try:
                     socket.do_handshake()
                 except ssl.WantReadError:
                     pass
+
+                if not socket.renegotiate_pending():
+                    break
 
             done = socket.shutdown()
 
