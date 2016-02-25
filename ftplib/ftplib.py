@@ -831,7 +831,7 @@ else:
                 while 1:
                     data = None
                     try:
-                        data = self._readSSL(conn.recv, blocksize)
+                        data = self._callSSL(conn.recv, blocksize)
                     except ssl.ZeroReturnError:
                         # pyOpenSSL does not return 0, but rather
                         # SSL.ZeroReturnError
@@ -854,7 +854,7 @@ else:
             try:
                 while 1:
                     try:
-                        line = self._readSSL(fp.readline)
+                        line = self._callSSL(fp.readline)
                         if self.debugging > 2: print '*retr*', repr(line)
                         if not line:
                             break
