@@ -750,8 +750,19 @@ else:
                 except ssl.WantReadError:
                     pass
 
-                if not socket.renegotiate_pending():
+                state = socket.state_string()
+
+                if state == 'SSL negotiation finished successfully':
                     break
+
+                # state is None if SSL layer does not support this method.
+                # For example is not supported on Windows.
+                # fallback to renegotiate_pending.
+                if state is None and not socket.renegotiate_pending():
+                    break
+
+                # Allow the handshake to be done.
+                time.sleep(0.01)
 
             socket.shutdown()
 
