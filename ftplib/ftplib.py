@@ -38,6 +38,7 @@ python ftplib.py -d localhost -l -p -l
 
 import os
 import sys
+import time
 
 # Import SOCKS module if it exists, else standard socket module socket
 try:
@@ -710,9 +711,22 @@ else:
 
             self.ssl_context.set_options(ssl.OP_SINGLE_DH_USE)
 
-        def _readSSL(self, callback, *args, **kwargs):
+        def getline(self):
             """
-            Try to read from SSL layer, retrying on WantReadError.
+            SSL wrapper for plan FTP.getline
+            """
+            return self._callSSL(FTP.getline, self)
+
+        def putline(self, line):
+            """
+            SSL wrapper for plan FTP.putline
+            """
+            return self._callSSL(FTP.putline, self, line)
+
+        def _callSSL(self, callback, *args, **kwargs):
+            """
+            Try to call a method which uses the SSL layer,
+            retrying on WantReadError.
             """
             try:
                 return callback(*args, **kwargs)
@@ -722,12 +736,8 @@ else:
                 # We wait for SSL thread to do its job and try again.
                 # Waiting for less than 0.01 result in reaching the
                 # recursion limit.
-                import time
                 time.sleep(0.01)
-                return self._readSSL(callback, *args, **kwargs)
-
-        def getline(self):
-            return self._readSSL(FTP.getline, self)
+                return self._callSSL(callback, *args, **kwargs)
 
         def doSSLShutdown(self, socket):
             '''Clear the SSL part of a socket.'''
@@ -743,7 +753,7 @@ else:
                 if not socket.renegotiate_pending():
                     break
 
-            done = socket.shutdown()
+            socket.shutdown()
 
         def login(self, user='', passwd='', acct='', secure=True):
             if secure and not isinstance(self.sock, ssl.Connection):
