@@ -750,14 +750,18 @@ else:
                 except ssl.WantReadError:
                     pass
 
-                state = socket.state_string()
+                try:
+                    state = socket.get_state_string()
+                except AttributeError:
+                    # Older pyOpenSSL
+                    state = socket.state_string()
 
                 if state == 'SSL negotiation finished successfully':
                     break
 
-                # state is None if SSL layer does not support this method.
-                # For example is not supported on Windows.
-                # fallback to renegotiate_pending.
+                # state is None if SSL layer does not support state string
+                # so we fall back to this flag, which some of the time
+                # does not produce the expected results.
                 if state is None and not socket.renegotiate_pending():
                     break
 
