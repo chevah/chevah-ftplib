@@ -893,7 +893,7 @@ else:
                 while 1:
                     buf = fp.read(blocksize)
                     if not buf: break
-                    conn.sendall(buf)
+                    self._callSSL(conn.sendall, buf)
                     if callback: callback(buf)
                 # shutdown ssl layer
                 if isinstance(conn, ssl.Connection):
@@ -912,7 +912,7 @@ else:
                     if buf[-2:] != CRLF:
                         if buf[-1] in CRLF: buf = buf[:-1]
                         buf = buf + CRLF
-                    conn.sendall(buf)
+                    self._callSSL(conn.sendall, buf)
                     if callback: callback(buf)
                 # shutdown ssl layer
                 if isinstance(conn, ssl.Connection):

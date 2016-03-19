@@ -6,7 +6,7 @@ Package definition for chevah.ftpslib.
 from setuptools import Command, setup
 import os
 
-VERSION = '2.7.3.c11'
+VERSION = '2.7.3.c12'
 
 
 class PublishCommand(Command):
