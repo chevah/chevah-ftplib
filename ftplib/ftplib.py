@@ -730,7 +730,7 @@ else:
             """
             try:
                 return callback(*args, **kwargs)
-            except ssl.WantReadError:
+            except (ssl.WantReadError, ssl.WantWriteError):
                 # This means that SSL layers still needs to read data in order
                 # to get our data.
                 # We wait for SSL thread to do its job and try again.
