@@ -442,7 +442,7 @@ class FTP:
         conn.close()
         return self.voidresp()
 
-    def retrlines(self, cmd, callback = None):
+    def retrlines(self, cmd, callback = None, strip_line=True):
         """Retrieve data in line mode.  A new port is created for you.
 
         Args:
@@ -450,6 +450,8 @@ class FTP:
           callback: An optional single parameter callable that is called
                     for each line with the trailing CRLF stripped.
                     [default: print_line()]
+          strip_line: A flat for allowing to return the actual line separator
+                      received over the data channel.
 
         Returns:
           The response code.
@@ -462,11 +464,13 @@ class FTP:
             line = fp.readline()
             if self.debugging > 2: print '*retr*', repr(line)
             if not line:
+                # Nothing read. We should be at EOF.
                 break
-            if line[-2:] == CRLF:
-                line = line[:-2]
-            elif line[-1:] == '\n':
-                line = line[:-1]
+            if strip_line:
+                if line[-2:] == CRLF:
+                    line = line[:-2]
+                elif line[-1:] == '\n':
+                    line = line[:-1]
             callback(line)
         fp.close()
         conn.close()
@@ -513,10 +517,19 @@ class FTP:
         conn = self.transfercmd(cmd)
         while 1:
             buf = fp.readline()
-            if not buf: break
-            if buf[-2:] != CRLF:
-                if buf[-1] in CRLF: buf = buf[:-1]
+            if not buf:
+                break
+
+
+            if buf[:-1] != '\n':
+                # No new line delimiter, so no need to convert it.
+                pass
+            elif buf[-2:] != CRLF:
+                # We need to convert the newline.
+                if buf[-1] in CRLF:
+                    buf = buf[:-1]
                 buf = buf + CRLF
+
             conn.sendall(buf)
             if callback: callback(buf)
         conn.close()
@@ -861,32 +874,55 @@ else:
                 conn.close()
             return self.voidresp()
 
-        def retrlines(self, cmd, callback = None):
+        def retrlines(self, cmd, callback = None, strip_line=True):
+            """
+            Read lines over SSL.
+            """
             if callback is None: callback = print_line
             resp = self.sendcmd('TYPE A')
             conn = self.transfercmd(cmd)
-            fp = socket._fileobject(conn, 'rb')
+            # Content of unfinished line.
+            buff = b''
             try:
                 while 1:
                     try:
-                        line = self._callSSL(fp.readline)
-                        if self.debugging > 2: print '*retr*', repr(line)
-                        if not line:
+                        data = self._callSSL(conn.recv, 8192)
+                        if not data:
                             break
                     except ssl.ZeroReturnError:
                         '''When the socket is using SSL it will raise
                         ZeroReturnError instead of returning 0.'''
                         break
-                    if line[-2:] == CRLF:
-                        line = line[:-2]
-                    elif line[-1:] == '\n':
-                        line = line[:-1]
-                    callback(line)
+
+                    data = buff + data
+                    buff = b''
+
+                    lines = data.splitlines(True)
+                    last_line = lines[-1]
+
+                    if not last_line.endswith('\n'):
+                        # last line does not have a new line... so it might
+                        # be a partial line.
+                        buff = last_line
+                        lines = lines[:-1]
+
+                    for line in lines:
+                        if strip_line:
+                            if line[-2:] == CRLF:
+                                line = line[:-2]
+                            elif line[-1:] == '\n':
+                                line = line[:-1]
+
+                        callback(line)
+
+                # Notify last line, if not sent already.
+                if buff:
+                    callback(buff)
+
                 # shutdown ssl layer
                 if isinstance(conn, ssl.Connection):
                     self.doSSLShutdown(conn)
             finally:
-                fp.close()
                 conn.close()
             return self.voidresp()
 
@@ -912,12 +948,20 @@ else:
             try:
                 while 1:
                     buf = fp.readline()
-                    if not buf: break
-                    if buf[-2:] != CRLF:
-                        if buf[-1] in CRLF: buf = buf[:-1]
+                    if not buf:
+                        break
+
+                    if buf[:-1] != '\n':
+                        # No new line delimiter, so no need to convert it.
+                        pass
+                    elif buf[-2:] != CRLF:
+                        if buf[-1] in CRLF:
+                            buf = buf[:-1]
                         buf = buf + CRLF
+
                     self._callSSL(conn.sendall, buf)
-                    if callback: callback(buf)
+                    if callback:
+                        callback(buf)
                 # shutdown ssl layer
                 if isinstance(conn, ssl.Connection):
                     self.doSSLShutdown(conn)
