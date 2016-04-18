@@ -521,7 +521,7 @@ class FTP:
                 break
 
 
-            if buf[:-1] != '\n':
+            if buf[-1] != '\n':
                 # No new line delimiter, so no need to convert it.
                 pass
             elif buf[-2:] != CRLF:
@@ -951,7 +951,7 @@ else:
                     if not buf:
                         break
 
-                    if buf[:-1] != '\n':
+                    if buf[-1] != '\n':
                         # No new line delimiter, so no need to convert it.
                         pass
                     elif buf[-2:] != CRLF:
